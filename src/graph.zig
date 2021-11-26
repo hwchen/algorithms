@@ -71,7 +71,12 @@ pub const Graph = struct {
     pub fn add_vertices(graph: *Graph, v_labels: [][]const u8) !void {
         for (v_labels) |v_label, i| {
             // Only add if not already added, otherwise skip to next
-            graph.label_to_vertex.putNoClobber(v_label, i) catch continue;
+            var entry = try graph.label_to_vertex.getOrPut(v_label);
+            if (entry.found_existing) {
+                continue;
+            } else {
+                entry.value_ptr.* = i;
+            }
             try graph.vertices.append(Graph.Vertex.init(graph.alloc));
         }
     }
@@ -219,10 +224,43 @@ test "build graph" {
     try expected_graph.label_to_vertex.put("e", 5);
 
     // Assert equals
+    // Vertices
+    try testing.expectEqual(expected_graph.vertices.items.len, graph.vertices.items.len);
     for (expected_graph.vertices.items) |expected_vertex, i| {
-        try testing.expectEqualSlices(Graph.EdgeIdx, expected_vertex.edges.items, graph.vertices.items[i].edges.items);
+        const v = graph.vertices.items[i];
+        try testing.expectEqual(false, v.explored);
+        try testing.expectEqualSlices(Graph.EdgeIdx, expected_vertex.edges.items, v.edges.items);
+    }
+    // Edges
+    try testing.expectEqual(expected_graph.edges.items.len, graph.edges.items.len);
+    for (expected_graph.edges.items) |expected_edge, i| {
+        const e = graph.edges.items[i];
+        try testing.expectEqual(expected_edge, e);
+    }
+    // label_to_vertex
+    try testing.expectEqual(expected_graph.label_to_vertex.count(), graph.label_to_vertex.count());
+    var it = expected_graph.label_to_vertex.iterator();
+    while (it.next()) |expected_kv| {
+        if (graph.label_to_vertex.get(expected_kv.key_ptr.*)) |v_idx| {
+            try testing.expectEqual(expected_kv.value_ptr.*, v_idx);
+        } else {
+            return error.expectedKeyNotFound;
+        }
     }
 
     // TODO check adding a vertex that already exists
+    var duplicate_vertex = [_][]const u8{"e"};
+    try graph.add_vertices(duplicate_vertex[0..]);
+
+    try testing.expectEqual(expected_graph.label_to_vertex.count(), graph.label_to_vertex.count());
+    var it_dup = expected_graph.label_to_vertex.iterator();
+    while (it_dup.next()) |expected_kv| {
+        if (graph.label_to_vertex.get(expected_kv.key_ptr.*)) |v_idx| {
+            try testing.expectEqual(expected_kv.value_ptr.*, v_idx);
+        } else {
+            return error.expectedKeyNotFound;
+        }
+    }
+
     // (not implemeted) check adding an edge that already exists
 }
