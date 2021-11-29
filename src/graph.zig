@@ -128,10 +128,46 @@ pub const Graph = struct {
                 var w = if (v == edge.v1) edge.v0 else edge.v1;
                 if (!graph.vertices.items[w].explored) {
                     try q.append(w);
+                    graph.vertices.items[w].explored = true;
                 }
-                graph.vertices.items[w].explored = true;
             }
         }
+    }
+
+    pub const ShortestPath = StringHashMap(usize);
+
+    /// Shortest path from s to each vertex.
+    fn shortest_path(graph: *Graph, s: VertexIdx) !ShortestPath {
+        var vtl = try graph.vertex_to_label();
+        defer vtl.deinit();
+
+        var res = ShortestPath.init(graph.alloc);
+        for (graph.vertices.items) |_, v_idx| {
+            try res.put(vtl.get(v_idx).?, undefined);
+        }
+        try res.put(vtl.get(s).?, 0);
+
+        // bfs uses queue to track state
+        var q = ArrayList(VertexIdx).init(graph.alloc);
+        defer q.deinit();
+
+        graph.vertices.items[s].explored = true;
+        try q.append(s);
+        while (q.items.len != 0) {
+            const v_idx = q.orderedRemove(0);
+            const v = graph.vertices.items[v_idx];
+            for (v.edges.items) |e_idx| {
+                const e = graph.edges.items[e_idx];
+                const w = if (e.v0 == v_idx) e.v1 else e.v0;
+                if (!graph.vertices.items[w].explored) {
+                    try q.append(w);
+                    graph.vertices.items[w].explored = true;
+                    try res.put(vtl.get(w).?, res.get(vtl.get(v_idx).?).? + 1);
+                }
+            }
+        }
+
+        return res;
     }
 };
 
@@ -160,6 +196,37 @@ test "bfs" {
     for (graph.vertices.items) |vertex| {
         try testing.expectEqual(true, vertex.explored);
     }
+}
+
+test "shortest_path" {
+    var alloc = testing.allocator;
+
+    var vertices = [_][]const u8{ "s", "a", "b", "c", "d", "e" };
+    var edges = [_]Tuple{
+        .{ .v0 = "s", .v1 = "a" },
+        .{ .v0 = "s", .v1 = "b" },
+        .{ .v0 = "a", .v1 = "c" },
+        .{ .v0 = "b", .v1 = "c" },
+        .{ .v0 = "b", .v1 = "d" },
+        .{ .v0 = "c", .v1 = "d" },
+        .{ .v0 = "c", .v1 = "e" },
+        .{ .v0 = "d", .v1 = "e" },
+    };
+
+    var graph = Graph.init(alloc);
+    try graph.add_vertices(vertices[0..]);
+    try graph.add_edges(edges[0..]);
+    defer graph.deinit();
+
+    var shortest = try graph.shortest_path(0);
+    defer shortest.deinit();
+
+    try testing.expectEqual(shortest.get("s"), 0);
+    try testing.expectEqual(shortest.get("a"), 1);
+    try testing.expectEqual(shortest.get("b"), 1);
+    try testing.expectEqual(shortest.get("c"), 2);
+    try testing.expectEqual(shortest.get("d"), 2);
+    try testing.expectEqual(shortest.get("e"), 3);
 }
 
 // For building edges from labels
